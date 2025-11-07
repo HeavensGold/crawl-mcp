@@ -264,18 +264,23 @@ def _load_tool_modules():
     global _tools_imported
     if _tools_imported:
         return
-    
+
     global web_crawling, search, youtube, file_processing, utilities
-    
+
     try:
         from .tools import web_crawling, search, youtube, file_processing, utilities
         _tools_imported = True
-    except ImportError:
+    except Exception as e:
+        # Log the actual error for debugging
+        import sys
+        print(f"Error loading tools (first attempt): {type(e).__name__}: {e}", file=sys.stderr)
         # Fallback for relative imports
         try:
             from crawl4ai_mcp.tools import web_crawling, search, youtube, file_processing, utilities
             _tools_imported = True
-        except ImportError:
+        except Exception as e2:
+            import sys
+            print(f"Error loading tools (second attempt): {type(e2).__name__}: {e2}", file=sys.stderr)
             _tools_imported = False
 
 def _ensure_browser_setup():

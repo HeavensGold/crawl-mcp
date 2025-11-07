@@ -204,6 +204,7 @@ class CustomSearchAPIClient:
                 'query': query,
                 'total_results': len(results),
                 'results': results,
+                'search_method': 'google_custom_search_api',
                 'processing_method': 'google_custom_search_api'
             }
             
@@ -274,15 +275,15 @@ class GoogleSearchProcessor:
         self.custom_search_client = CustomSearchAPIClient()
         
         # Search mode configuration
-        self.search_mode = os.getenv('GOOGLE_SEARCH_MODE', 'hybrid').lower()
+        self.search_mode = os.getenv('GOOGLE_SEARCH_MODE', 'googlesearch_only').lower()
         self.max_retries = int(os.getenv('GOOGLE_SEARCH_MAX_RETRIES', '3'))
         self.fallback_delay = float(os.getenv('GOOGLE_SEARCH_FALLBACK_DELAY', '2.0'))
         
         # Validation for search mode
         valid_modes = ['googlesearch_only', 'custom_search_only', 'hybrid']
         if self.search_mode not in valid_modes:
-            logging.warning(f"Invalid GOOGLE_SEARCH_MODE '{self.search_mode}'. Using 'hybrid'")
-            self.search_mode = 'hybrid'
+            logging.warning(f"Invalid GOOGLE_SEARCH_MODE '{self.search_mode}'. Using 'googlesearch_only'")
+            self.search_mode = 'googlesearch_only'
         
         self.search_patterns = [
             # Domain-specific search patterns
@@ -371,13 +372,21 @@ class GoogleSearchProcessor:
             
             # Route to appropriate search method based on configuration
             if self.search_mode == 'custom_search_only':
-                return await self._search_with_custom_api(
+                result = await self._search_with_custom_api(
                     enhanced_query, num_results, language, region, search_genre, validation
                 )
+                if result.get('success'):
+                    result['search_method'] = 'google_custom_search_api'
+                    result['fallback_used'] = False
+                return result
             elif self.search_mode == 'googlesearch_only':
-                return await self._search_with_googlesearch(
+                result = await self._search_with_googlesearch(
                     enhanced_query, num_results, language, region, search_genre, validation
                 )
+                if result.get('success'):
+                    result['search_method'] = 'googlesearch-python'
+                    result['fallback_used'] = False
+                return result
             else:  # hybrid mode
                 return await self._search_with_fallback(
                     enhanced_query, num_results, language, region, search_genre, validation
@@ -401,72 +410,127 @@ class GoogleSearchProcessor:
     ) -> Dict[str, Any]:
         """Hybrid search with automatic fallback on 429 errors"""
         attempts = []
-        
+
+        logging.info(f"Starting hybrid search for query: '{query}' (num_results: {num_results})")
+
         # Try googlesearch-python first
         if self.rate_limiter.can_make_request('googlesearch'):
-            googlesearch_result = await self._search_with_googlesearch(
-                query, num_results, language, region, search_genre, validation,
-                record_rate_limit=True
-            )
-            attempts.append(('googlesearch-python', googlesearch_result))
-            
-            # If successful or non-429 error, return result
-            if googlesearch_result['success'] or not self._is_rate_limit_error(googlesearch_result):
-                return googlesearch_result
-            
-            # 429 error detected, wait and try Custom Search API
-            logging.warning(f"429 error detected with googlesearch-python, falling back to Custom Search API")
-            await asyncio.sleep(self.fallback_delay)
+            logging.debug("Attempting googlesearch-python search")
+            try:
+                googlesearch_result = await self._search_with_googlesearch(
+                    query, num_results, language, region, search_genre, validation,
+                    record_rate_limit=True
+                )
+                attempts.append(('googlesearch-python', googlesearch_result))
+
+                # If successful, return immediately with method info
+                if googlesearch_result['success']:
+                    googlesearch_result['search_method'] = 'googlesearch-python'
+                    googlesearch_result['fallback_used'] = False
+                    logging.info(f"googlesearch-python search succeeded with {len(googlesearch_result.get('results', []))} results")
+                    return googlesearch_result
+
+                # If non-429 error (like "No search results found"), this might be a real search issue
+                # In hybrid mode, we should still try the other method to see if it gets better results
+                if not self._is_rate_limit_error(googlesearch_result):
+                    logging.warning(f"googlesearch-python failed with non-rate-limit error: {googlesearch_result.get('error', 'Unknown')}")
+                    logging.info("Trying Custom Search API as alternative method")
+                else:
+                    logging.info("googlesearch-python hit rate limit, falling back to Custom Search API")
+                    await asyncio.sleep(self.fallback_delay)
+
+            except Exception as e:
+                logging.error(f"Unexpected error in googlesearch-python: {str(e)}")
+                attempts.append(('googlesearch-python', {
+                    'success': False,
+                    'error': f'Unexpected error: {str(e)}',
+                    'exception': True
+                }))
         else:
             # Rate limit prevents googlesearch request
             wait_time = self.rate_limiter.get_wait_time('googlesearch')
+            logging.info(f"googlesearch-python rate limited. Wait time: {wait_time:.1f}s")
             attempts.append(('googlesearch-python', {
                 'success': False,
                 'error': f'Rate limit reached. Wait {wait_time:.1f} seconds',
                 'rate_limited': True
             }))
-        
-        # Try Custom Search API as fallback
+
+        # Try Custom Search API as fallback or alternative
         if self.custom_search_client.is_configured() and self.rate_limiter.can_make_request('custom_search'):
-            custom_search_result = await self._search_with_custom_api(
-                query, num_results, language, region, search_genre, validation,
-                record_rate_limit=True
-            )
-            attempts.append(('google_custom_search_api', custom_search_result))
-            
-            if custom_search_result['success']:
-                # Add fallback information to successful result
-                custom_search_result['fallback_info'] = {
-                    'primary_method': 'googlesearch-python',
-                    'fallback_method': 'google_custom_search_api',
-                    'fallback_reason': 'Rate limit or 429 error',
-                    'attempts': attempts
-                }
-                return custom_search_result
+            logging.debug("Attempting Custom Search API search")
+            try:
+                custom_search_result = await self._search_with_custom_api(
+                    query, num_results, language, region, search_genre, validation,
+                    record_rate_limit=True
+                )
+                attempts.append(('google_custom_search_api', custom_search_result))
+
+                if custom_search_result['success']:
+                    # Add fallback information to successful result
+                    custom_search_result['search_method'] = 'google_custom_search_api'
+                    custom_search_result['fallback_used'] = True
+                    custom_search_result['fallback_info'] = {
+                        'primary_method': 'googlesearch-python',
+                        'fallback_method': 'google_custom_search_api',
+                        'fallback_reason': 'Primary method failed or rate limited',
+                        'attempts': attempts
+                    }
+                    logging.info(f"Custom Search API succeeded with {len(custom_search_result.get('results', []))} results")
+                    return custom_search_result
+                else:
+                    logging.warning(f"Custom Search API failed: {custom_search_result.get('error', 'Unknown')}")
+
+            except Exception as e:
+                logging.error(f"Unexpected error in Custom Search API: {str(e)}")
+                attempts.append(('google_custom_search_api', {
+                    'success': False,
+                    'error': f'Unexpected error: {str(e)}',
+                    'exception': True
+                }))
         else:
+            # Custom Search API not available
             if not self.custom_search_client.is_configured():
+                logging.warning("Custom Search API not configured for fallback")
                 attempts.append(('google_custom_search_api', {
                     'success': False,
                     'error': 'Custom Search API not configured',
-                    'suggestion': 'Set GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID'
+                    'suggestion': 'Set GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID for hybrid mode fallback',
+                    'configuration_needed': True
                 }))
             else:
                 wait_time = self.rate_limiter.get_wait_time('custom_search')
+                logging.info(f"Custom Search API rate limited. Wait time: {wait_time:.1f}s")
                 attempts.append(('google_custom_search_api', {
                     'success': False,
                     'error': f'Rate limit reached. Wait {wait_time:.1f} seconds',
                     'rate_limited': True
                 }))
-        
-        # Both methods failed
+
+        # Check if we have any successful results from googlesearch-python
+        googlesearch_attempt = next((result for method, result in attempts if method == 'googlesearch-python' and result.get('success')), None)
+        if googlesearch_attempt:
+            # Return the successful googlesearch result even if Custom Search API is not available
+            googlesearch_attempt['search_method'] = 'googlesearch-python'
+            googlesearch_attempt['fallback_used'] = False
+            googlesearch_attempt['hybrid_mode'] = 'googlesearch_only_available'
+            return googlesearch_attempt
+
+        # Both methods failed - provide comprehensive error information
+        logging.error("All search methods failed in hybrid mode")
+
+        # Analyze failure patterns to provide better suggestions
+        failure_analysis = self._analyze_search_failures(attempts)
+
         return {
             'success': False,
-            'error': 'All search methods failed or rate limited',
+            'error': failure_analysis['error_message'],
             'query': query,
             'fallback_info': {
                 'search_mode': 'hybrid',
                 'attempts': attempts,
-                'suggestion': 'Wait for rate limits to reset or configure missing API credentials'
+                'failure_analysis': failure_analysis,
+                'suggestion': failure_analysis['suggestion']
             }
         }
     
@@ -494,7 +558,8 @@ class GoogleSearchProcessor:
                     lang=language,
                     sleep_interval=1.0,  # Respectful delay between requests
                     region=region,
-                    safe='active'  # Always use safe search as requested
+                    safe='active',  # Always use safe search as requested
+                    headless=True  # Use headless mode for server environments
                 ))
             
             urls = await loop.run_in_executor(None, do_search)
@@ -565,6 +630,7 @@ class GoogleSearchProcessor:
                 'enhanced_query': query,
                 'total_results': len(search_results),
                 'results': search_results,
+                'search_method': 'googlesearch-python',
                 'search_metadata': {
                     'query_info': validation,
                     'search_params': {
@@ -682,7 +748,85 @@ class GoogleSearchProcessor:
                 'too many requests' in error_msg
             )
         return False
-    
+
+    def _analyze_search_failures(self, attempts: List[Tuple[str, Dict[str, Any]]]) -> Dict[str, Any]:
+        """Analyze search failures to provide better error messages and suggestions"""
+        analysis = {
+            'attempts_count': len(attempts),
+            'methods_attempted': [],
+            'failure_types': [],
+            'configuration_issues': [],
+            'error_message': '',
+            'suggestion': ''
+        }
+
+        for method_name, result in attempts:
+            analysis['methods_attempted'].append(method_name)
+
+            if result.get('success'):
+                # This shouldn't happen in failure analysis, but handle it gracefully
+                analysis['failure_types'].append(f'{method_name}: unexpected success')
+            elif result.get('rate_limited'):
+                analysis['failure_types'].append(f'{method_name}: rate limited')
+            elif result.get('configuration_needed'):
+                analysis['failure_types'].append(f'{method_name}: not configured')
+                analysis['configuration_issues'].append(method_name)
+            elif result.get('exception'):
+                analysis['failure_types'].append(f'{method_name}: exception')
+            elif 'No search results found' in result.get('error', ''):
+                analysis['failure_types'].append(f'{method_name}: no results')
+            elif 'rate limit' in result.get('error', '').lower() or '429' in result.get('error', ''):
+                analysis['failure_types'].append(f'{method_name}: rate limit')
+            else:
+                analysis['failure_types'].append(f'{method_name}: other error')
+
+        # Check if googlesearch-python succeeded first (highest priority)
+        googlesearch_success = any(
+            method_name == 'googlesearch-python' and result.get('success')
+            for method_name, result in attempts
+        )
+
+        if googlesearch_success:
+            # Don't treat missing Custom Search API as a failure when googlesearch worked
+            analysis['error_message'] = "Search completed successfully with primary method"
+            analysis['suggestion'] = "Custom Search API optional - configure for enhanced reliability"
+
+        # Generate appropriate error message and suggestion based on analysis
+        elif analysis['configuration_issues']:
+            if 'google_custom_search_api' in analysis['configuration_issues'] and len(analysis['methods_attempted']) == 1:
+                # Only Custom Search API was attempted and failed
+                analysis['error_message'] = "Custom Search API not configured"
+                analysis['suggestion'] = "Set GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID, or use GOOGLE_SEARCH_MODE=googlesearch_only"
+            else:
+                analysis['error_message'] = "Search methods not properly configured"
+                analysis['suggestion'] = "Check API credentials and configuration"
+
+        elif 'rate limited' in ''.join(analysis['failure_types']):
+            analysis['error_message'] = "Search methods rate limited"
+            analysis['suggestion'] = "Wait for rate limits to reset and try again"
+
+        elif any('no results' in failure for failure in analysis['failure_types']):
+            analysis['error_message'] = "No search results found from available search methods"
+            # Generate simplified query suggestions
+            from random import choice
+            suggestions = [
+                "Try using different search terms",
+                "Try searching for more general keywords",
+                "Check spelling and try again",
+                "Use fewer or different keywords"
+            ]
+            analysis['suggestion'] = choice(suggestions)
+
+        elif any('exception' in failure for failure in analysis['failure_types']):
+            analysis['error_message'] = "Search methods encountered unexpected errors"
+            analysis['suggestion'] = "Try again later or use a different search method"
+
+        else:
+            analysis['error_message'] = "All search methods failed"
+            analysis['suggestion'] = "Try with different search terms or check your internet connection"
+
+        return analysis
+
     def get_search_configuration(self) -> Dict[str, Any]:
         """Get current search configuration and API status"""
         return {
@@ -772,12 +916,15 @@ class GoogleSearchProcessor:
         
         else:  # hybrid mode
             if config['googlesearch_python']['can_make_request']:
-                return "Ready to search (will try googlesearch-python first)"
+                if config['custom_search_api']['configured']:
+                    return "Ready to search (will try googlesearch-python first, Custom Search API as fallback)"
+                else:
+                    return "Ready to search (googlesearch-python available, Custom Search API optional)"
             elif config['custom_search_api']['configured'] and config['custom_search_api']['can_make_request']:
                 return "googlesearch-python rate limited, but Custom Search API available as fallback"
             elif not config['custom_search_api']['configured']:
                 wait_time = config['googlesearch_python']['wait_time']
-                return f"googlesearch-python rate limited. Wait {wait_time:.1f}s or configure Custom Search API for fallback"
+                return f"googlesearch-python rate limited. Wait {wait_time:.1f}s for limits to reset"
             else:
                 return "Both search methods rate limited. Wait for limits to reset"
     

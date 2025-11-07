@@ -84,20 +84,37 @@ async def search_google(
         )
         
         if result['success']:
-            return {
+            # Return successful result with all metadata
+            response = {
                 "success": True,
                 "query": result['query'],
                 "total_results": result['total_results'],
                 "results": result['results'],
-                "search_metadata": result['search_metadata']
+                "search_metadata": result.get('search_metadata'),
+                "search_method": result.get('search_method'),
+                "fallback_used": result.get('fallback_used', False),
+                "hybrid_mode": result.get('hybrid_mode')
             }
+
+            # Include fallback info if available
+            if 'fallback_info' in result:
+                response['fallback_info'] = result['fallback_info']
+
+            return response
         else:
-            return {
+            # Return error with all available information
+            response = {
                 "success": False,
                 "query": query,
                 "error": result.get('error'),
                 "suggestion": result.get('suggestion')
             }
+
+            # Include fallback info if available for better error context
+            if 'fallback_info' in result:
+                response['fallback_info'] = result['fallback_info']
+
+            return response
             
     except Exception as e:
         return {
