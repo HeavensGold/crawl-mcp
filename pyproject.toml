@@ -35,7 +35,7 @@ dependencies = [
     "openpyxl>=3.1.5",
     "python-pptx==1.0.2",
     "xlrd>=2.0.1",
-    "googlesearch-python @ git+https://github.com/HeavensGold/googleseartch.git@playwright"
+    "googlesearch-python @ git+https://github.com/HeavensGold/googleseartch.git@playwright",
     "aiohttp>=3.8.0",
     "beautifulsoup4>=4.12.0",
     "youtube-transcript-api==1.2.3",
