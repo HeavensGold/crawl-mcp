@@ -345,7 +345,7 @@ async def crawl_url(
     auto_summarize: Annotated[bool, Field(description="Auto-summarize large content")] = False,
     use_undetected_browser: Annotated[bool, Field(description="Bypass bot detection")] = False
 ) -> dict:
-    """Extract web page content with JavaScript support. Use wait_for_js=true for SPAs."""
+    """Extract web page content with JavaScript support. Use wait_for_js=true for SPAs. For Google search, use URLs like: https://www.google.com/search?q=query (web), add &tbm=nws (news), &tbm=vid (videos), &tbm=isch (images)."""
     _load_tool_modules()
     if not _tools_imported:
         return {
@@ -1472,7 +1472,6 @@ async def extract_structured_data(
             "error": f"Structured extraction error: {str(e)}"
         }
 
-@mcp.tool()
 async def search_google(
     request: Annotated[Dict[str, Any], Field(description="Dict with: query (required), num_results, search_genre, language, region, recent_days")]
 ) -> Dict[str, Any]:
@@ -1528,7 +1527,6 @@ async def batch_search_google(
             "error": f"Batch search error: {str(e)}"
         }
 
-@mcp.tool()
 async def search_and_crawl(
     request: Annotated[Dict[str, Any], Field(description="Dict with: search_query (required), crawl_top_results, search_genre, recent_days")]
 ) -> Dict[str, Any]:
@@ -2037,7 +2035,7 @@ def get_tool_selection_guide() -> dict:
     return {
         "web_crawling": ["crawl_url", "deep_crawl_site", "crawl_url_with_fallback", "intelligent_extract", "extract_entities", "extract_structured_data"],
         "youtube": ["extract_youtube_transcript", "batch_extract_youtube_transcripts", "get_youtube_video_info", "get_youtube_api_setup_guide"],
-        "search": ["search_google", "batch_search_google", "search_and_crawl", "get_search_genres"],
+        "google_search": "Use crawl_url with Google search URLs: https://www.google.com/search?q=query (web), &tbm=nws (news), &tbm=vid (videos), &tbm=isch (images)",
         "batch": ["batch_crawl", "multi_url_crawl"],
         "files": ["process_file", "get_supported_file_formats", "enhanced_process_large_content"],
         "config": ["get_llm_config_info", "get_tool_selection_guide"],
