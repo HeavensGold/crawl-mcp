@@ -40,8 +40,8 @@ class CrawlRequest(BaseRequest):
     # Browser configuration
     user_agent: Optional[str] = Field(None, description="Custom user agent string")
     headers: Optional[Dict[str, str]] = Field(None, description="Custom HTTP headers")
-    enable_caching: bool = Field(True, description="Whether to enable caching")
-    cache_mode: str = Field("enabled", description="Cache mode: 'enabled', 'disabled', 'bypass'")
+    enable_caching: bool = Field(False, description="Whether to enable caching")
+    cache_mode: str = Field("disabled", description="Cache mode: 'enabled', 'disabled', 'bypass'")
     
     # JavaScript and interaction
     execute_js: Optional[str] = Field(None, description="JavaScript code to execute")
