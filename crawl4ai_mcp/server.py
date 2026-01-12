@@ -343,7 +343,9 @@ async def crawl_url(
     timeout: Annotated[int, Field(description="Timeout in seconds")] = 60,
     wait_for_js: Annotated[bool, Field(description="Wait for JavaScript")] = False,
     auto_summarize: Annotated[bool, Field(description="Auto-summarize large content")] = False,
-    use_undetected_browser: Annotated[bool, Field(description="Bypass bot detection")] = False
+    use_undetected_browser: Annotated[bool, Field(description="Bypass bot detection")] = False,
+    enable_caching: Annotated[bool, Field(description="Whether to enable caching (default: False)")] = False,
+    cache_mode: Annotated[str, Field(description="Cache mode: 'enabled', 'disabled', 'bypass' (default: 'disabled')")] = "disabled"
 ) -> dict:
     """Extract web page content with JavaScript support. Use wait_for_js=true for SPAs. For Google search, use URLs like: https://www.google.com/search?q=query (web), add &tbm=nws (news), &tbm=vid (videos), &tbm=isch (images)."""
     _load_tool_modules()
@@ -359,7 +361,8 @@ async def crawl_url(
             take_screenshot=take_screenshot, generate_markdown=generate_markdown,
             include_cleaned_html=include_cleaned_html,
             wait_for_selector=wait_for_selector, timeout=timeout, wait_for_js=wait_for_js,
-            auto_summarize=auto_summarize, use_undetected_browser=use_undetected_browser
+            auto_summarize=auto_summarize, use_undetected_browser=use_undetected_browser,
+            enable_caching=enable_caching, cache_mode=cache_mode
         )
         
         # Convert CrawlResponse to dict
@@ -941,7 +944,9 @@ async def crawl_url_with_fallback(
     wait_for_selector: Annotated[Optional[str], Field(description="Element to wait for")] = None,
     timeout: Annotated[int, Field(description="Timeout in seconds")] = 60,
     wait_for_js: Annotated[bool, Field(description="Wait for JavaScript")] = False,
-    auto_summarize: Annotated[bool, Field(description="Auto-summarize content")] = False
+    auto_summarize: Annotated[bool, Field(description="Auto-summarize content")] = False,
+    enable_caching: Annotated[bool, Field(description="Enable cache (default: False)")] = False,
+    cache_mode: Annotated[str, Field(description="Cache mode (default: 'disabled')")] = "disabled"
 ) -> dict:
     """Crawl with fallback strategies for anti-bot sites."""
     _load_tool_modules()
@@ -956,7 +961,7 @@ async def crawl_url_with_fallback(
             url=url, css_selector=css_selector, xpath=xpath, extract_media=extract_media,
             take_screenshot=take_screenshot, generate_markdown=generate_markdown,
             wait_for_selector=wait_for_selector, timeout=timeout, wait_for_js=wait_for_js,
-            auto_summarize=auto_summarize
+            auto_summarize=auto_summarize, enable_caching=enable_caching, cache_mode=cache_mode
         )
         return result
     except Exception as e:

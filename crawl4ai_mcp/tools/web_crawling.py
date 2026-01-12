@@ -356,11 +356,16 @@ async def _internal_crawl_url(request: CrawlRequest) -> CrawlResponse:
             )
 
         # Setup cache mode
-        cache_mode = CacheMode.ENABLED
-        if not request.enable_caching or request.cache_mode == "disabled":
-            cache_mode = CacheMode.DISABLED
+        cache_mode = CacheMode.DISABLED
+        if request.enable_caching:
+            if request.cache_mode == "enabled":
+                cache_mode = CacheMode.ENABLED
+            elif request.cache_mode == "bypass":
+                cache_mode = CacheMode.BYPASS
         elif request.cache_mode == "bypass":
-            cache_mode = CacheMode.BYPASS
+             cache_mode = CacheMode.BYPASS
+        elif request.cache_mode == "enabled":
+             cache_mode = CacheMode.ENABLED
 
         # Configure chunking if requested
         chunking_strategy = None
@@ -1683,8 +1688,8 @@ async def crawl_url(
     overlap_rate: Annotated[float, Field(description="Overlap rate between chunks 0.0-1.0 (default: 0.1)")] = 0.1,
     user_agent: Annotated[Optional[str], Field(description="Custom user agent string (default: None)")] = None,
     headers: Annotated[Optional[Dict[str, str]], Field(description="Custom HTTP headers (default: None)")] = None,
-    enable_caching: Annotated[bool, Field(description="Whether to enable caching (default: True)")] = True,
-    cache_mode: Annotated[str, Field(description="Cache mode: 'enabled', 'disabled', 'bypass' (default: 'enabled')")] = "enabled",
+    enable_caching: Annotated[bool, Field(description="Whether to enable caching (default: False)")] = False,
+    cache_mode: Annotated[str, Field(description="Cache mode: 'enabled', 'disabled', 'bypass' (default: 'disabled')")] = "disabled",
     execute_js: Annotated[Optional[str], Field(description="JavaScript code to execute (default: None)")] = None,
     wait_for_js: Annotated[bool, Field(description="Wait for JavaScript to complete (default: False)")] = False,
     simulate_user: Annotated[bool, Field(description="Simulate human-like browsing behavior (default: False)")] = False,
@@ -1879,8 +1884,8 @@ async def crawl_url_with_fallback(
     overlap_rate: Annotated[float, Field(description="Chunk overlap")] = 0.1,
     user_agent: Annotated[Optional[str], Field(description="User agent")] = None,
     headers: Annotated[Optional[Dict[str, str]], Field(description="HTTP headers")] = None,
-    enable_caching: Annotated[bool, Field(description="Enable cache")] = True,
-    cache_mode: Annotated[str, Field(description="Cache mode")] = "enabled",
+    enable_caching: Annotated[bool, Field(description="Enable cache (default: False)")] = False,
+    cache_mode: Annotated[str, Field(description="Cache mode (default: 'disabled')")] = "disabled",
     execute_js: Annotated[Optional[str], Field(description="JS to execute")] = None,
     wait_for_js: Annotated[bool, Field(description="Wait for JS")] = False,
     simulate_user: Annotated[bool, Field(description="Simulate user")] = False,
